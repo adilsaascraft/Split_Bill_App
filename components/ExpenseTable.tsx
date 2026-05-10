@@ -1,6 +1,7 @@
+// /components/ExpenseTable.tsx
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ColumnDef } from '@tanstack/react-table'
 import { Pencil, Trash2, Loader2, Shield, Lock } from 'lucide-react'
 
@@ -26,7 +27,16 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
 import AddExpenseForm from './AddExpenseForm'
+
 import { toast } from 'sonner'
 
 import { useAuthStore } from '@/store/useAuthStore'
@@ -47,7 +57,52 @@ export function ExpenseTable({ data, mutate }: Props) {
 
   const [deleteLoading, setDeleteLoading] = useState(false)
 
-  /* ================= DELETE ================= */
+  /* =================================================
+     FILTERS
+  ================================================= */
+
+  const [paidByFilter, setPaidByFilter] = useState('all')
+
+  /* =================================================
+     UNIQUE USERS
+  ================================================= */
+
+  const paidByUsers = useMemo(() => {
+    const map = new Map()
+
+    data.forEach((expense) => {
+      const user = expense.paidBy
+
+      if (user?._id) {
+        map.set(user._id, user)
+      }
+    })
+
+    return Array.from(map.values())
+  }, [data])
+
+  /* =================================================
+     FILTERED DATA
+  ================================================= */
+
+  const filteredData =
+    paidByFilter === 'all'
+      ? data
+      : data.filter((expense) => expense.paidBy?._id === paidByFilter)
+
+  /* =================================================
+     TOTAL PAID
+  ================================================= */
+
+  const totalPaid = filteredData.reduce(
+    (sum, expense) => sum + expense.amount,
+    0,
+  )
+
+  /* =================================================
+     DELETE
+  ================================================= */
+
   const handleDelete = async () => {
     try {
       setDeleteLoading(true)
@@ -68,6 +123,7 @@ export function ExpenseTable({ data, mutate }: Props) {
       mutate()
 
       setDeleteOpen(false)
+
       setSelectedExpense(null)
     } catch (err: any) {
       toast.error(err.message || 'Delete failed')
@@ -76,19 +132,26 @@ export function ExpenseTable({ data, mutate }: Props) {
     }
   }
 
-  /* ================= COLUMNS ================= */
+  /* =================================================
+     TABLE COLUMNS
+  ================================================= */
+
   const columns: ColumnDef<any>[] = [
     {
       accessorKey: 'category',
+
       header: 'Category',
     },
+
     {
       accessorKey: 'title',
+
       header: 'Title',
     },
 
     {
       accessorKey: 'amount',
+
       header: 'Amount',
 
       cell: ({ row }) => (
@@ -98,6 +161,7 @@ export function ExpenseTable({ data, mutate }: Props) {
 
     {
       accessorKey: 'date',
+
       header: 'Date',
 
       cell: ({ row }) => new Date(row.original.date).toLocaleDateString(),
@@ -105,6 +169,7 @@ export function ExpenseTable({ data, mutate }: Props) {
 
     {
       accessorKey: 'createdBy',
+
       header: 'Paid By',
 
       cell: ({ row }) => {
@@ -120,9 +185,13 @@ export function ExpenseTable({ data, mutate }: Props) {
       },
     },
 
-    /* ================= ACTIONS ================= */
+    /* =================================================
+       ACTIONS
+    ================================================= */
+
     {
       id: 'actions',
+
       header: 'Actions',
 
       cell: ({ row }) => {
@@ -139,10 +208,11 @@ export function ExpenseTable({ data, mutate }: Props) {
 
         const hasAccess = isOwner || isAdmin
 
-        // 🔐 No access
+        /* 🔐 NO ACCESS */
+
         if (!hasAccess) {
           return (
-            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Lock className="h-4 w-4" />
               No Access
             </div>
@@ -152,6 +222,7 @@ export function ExpenseTable({ data, mutate }: Props) {
         return (
           <div className="flex items-center gap-2">
             {/* ✏️ EDIT */}
+
             <Button
               size="icon"
               variant="outline"
@@ -165,6 +236,7 @@ export function ExpenseTable({ data, mutate }: Props) {
             </Button>
 
             {/* ❌ DELETE */}
+
             <Button
               size="icon"
               variant="destructive"
@@ -182,11 +254,64 @@ export function ExpenseTable({ data, mutate }: Props) {
     },
   ]
 
+  /* =================================================
+     UI
+  ================================================= */
+
   return (
     <>
-      <DataTable columns={columns} data={data} />
+      <div className="space-y-4">
+        {/* 🔥 FILTER CARD */}
 
-      {/* ================= EDIT SHEET ================= */}
+        <div className="flex flex-col gap-4 rounded-2xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          {/* LEFT */}
+
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">Paid By</p>
+
+            <Select value={paidByFilter} onValueChange={setPaidByFilter}>
+              <SelectTrigger className="mt-1 w-full">
+                <SelectValue placeholder="Filter User" />
+              </SelectTrigger>
+
+              <SelectContent>
+                {/* ALL */}
+
+                <SelectItem value="all">All Users</SelectItem>
+
+                {/* USERS */}
+
+                {paidByUsers.map((user: any) => (
+                  <SelectItem key={user._id} value={user._id}>
+                    {user.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* RIGHT */}
+
+          <div className="rounded-xl bg-sky-50 px-5 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+              Total Paid
+            </p>
+
+            <h2 className="text-2xl font-bold text-sky-900">
+              ₹{totalPaid.toLocaleString()}
+            </h2>
+          </div>
+        </div>
+
+        {/* 📋 TABLE */}
+
+        <DataTable columns={columns} data={filteredData} />
+      </div>
+
+      {/* =================================================
+         EDIT SHEET
+      ================================================= */}
+
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="w-full sm:w-[600px]">
           <SheetHeader>
@@ -212,7 +337,10 @@ export function ExpenseTable({ data, mutate }: Props) {
         </SheetContent>
       </Sheet>
 
-      {/* ================= DELETE DIALOG ================= */}
+      {/* =================================================
+         DELETE DIALOG
+      ================================================= */}
+
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
