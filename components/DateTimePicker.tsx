@@ -17,11 +17,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 /* ================= TYPES ================= */
 
 type Props = {
+  disabled: boolean
   value?: Date
   onChange?: (date: Date | undefined) => void
   minuteStep?: number
   placeholder?: string
   className?: string
+  mode?: 'date' | 'datetime' // ✅ key prop
 }
 
 /* ================= HELPERS ================= */
@@ -39,9 +41,11 @@ function toSafeDate(input: unknown): Date | undefined {
 export function DateTimePicker({
   value,
   onChange,
+  disabled,
   minuteStep = 5,
-  placeholder = 'MM/DD/YYYY HH:mm',
+  placeholder,
   className,
+  mode = 'datetime', // default
 }: Props) {
   const [internalDate, setInternalDate] = React.useState<Date | undefined>()
   const [isOpen, setIsOpen] = React.useState(false)
@@ -69,13 +73,18 @@ export function DateTimePicker({
   const updateDatePart = (selected: Date) => {
     const newDate = new Date(selected)
 
-    // keep time if already selected
-    if (date) {
+    if (mode === 'datetime' && date) {
       newDate.setHours(date.getHours())
       newDate.setMinutes(date.getMinutes())
+    } else {
+      newDate.setHours(0, 0, 0, 0) // clean date
     }
 
     setDate(newDate)
+
+    if (mode === 'date') {
+      setIsOpen(false) // auto close for date-only
+    }
   }
 
   const updateTimePart = (type: 'hour' | 'minute', value: number) => {
@@ -87,12 +96,10 @@ export function DateTimePicker({
     if (type === 'minute') newDate.setMinutes(value)
 
     setDate(newDate)
-
-    // ✅ CLOSE AFTER TIME SELECTED (only if date exists)
     setIsOpen(false)
   }
 
-  /* ================= SCROLL HANDLER ================= */
+  /* ================= SCROLL ================= */
 
   const handleWheel = (e: React.WheelEvent, type: 'hour' | 'minute') => {
     e.preventDefault()
@@ -119,12 +126,19 @@ export function DateTimePicker({
     setDate(newDate)
   }
 
+  /* ================= FORMAT ================= */
+
+  const displayValue = date
+    ? format(date, mode === 'date' ? 'dd/MM/yyyy' : 'dd/MM/yyyy HH:mm')
+    : (placeholder ?? (mode === 'date' ? 'DD/MM/YYYY' : 'DD/MM/YYYY HH:mm'))
+
   /* ================= UI ================= */
 
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <Button
+          disabled={disabled}
           type="button"
           variant="outline"
           className={cn(
@@ -134,12 +148,12 @@ export function DateTimePicker({
           )}
         >
           <CalendarIcon className="mr-2 h-4 w-4" />
-          {date ? format(date, 'MM/dd/yyyy HH:mm') : placeholder}
+          {displayValue}
         </Button>
       </PopoverTrigger>
 
       <PopoverContent className="w-auto p-0">
-        <div className="sm:flex">
+        <div className={mode === 'date' ? '' : 'sm:flex'}>
           {/* CALENDAR */}
           <Calendar
             mode="single"
@@ -148,48 +162,50 @@ export function DateTimePicker({
             initialFocus
           />
 
-          {/* TIME PICKER */}
-          <div className="flex sm:h-[300px] divide-x">
-            {/* HOURS */}
-            <ScrollArea
-              className="w-20"
-              onWheel={(e) => handleWheel(e, 'hour')}
-            >
-              <div className="flex flex-col p-2 gap-1">
-                {hours.map((hour) => (
-                  <Button
-                    key={hour}
-                    size="icon"
-                    variant={date?.getHours() === hour ? 'default' : 'ghost'}
-                    onClick={() => updateTimePart('hour', hour)}
-                  >
-                    {hour.toString().padStart(2, '0')}
-                  </Button>
-                ))}
-              </div>
-            </ScrollArea>
+          {/* TIME PICKER (ONLY IF datetime) */}
+          {mode === 'datetime' && (
+            <div className="flex sm:h-[300px] divide-x">
+              {/* HOURS */}
+              <ScrollArea className="w-20">
+                <div
+                  className="flex flex-col p-2 gap-1"
+                  onWheel={(e) => handleWheel(e, 'hour')}
+                >
+                  {hours.map((hour) => (
+                    <Button
+                      key={hour}
+                      size="icon"
+                      variant={date?.getHours() === hour ? 'default' : 'ghost'}
+                      onClick={() => updateTimePart('hour', hour)}
+                    >
+                      {hour.toString().padStart(2, '0')}
+                    </Button>
+                  ))}
+                </div>
+              </ScrollArea>
 
-            {/* MINUTES */}
-            <ScrollArea
-              className="w-20"
-              onWheel={(e) => handleWheel(e, 'minute')}
-            >
-              <div className="flex flex-col p-2 gap-1">
-                {minutes.map((minute) => (
-                  <Button
-                    key={minute}
-                    size="icon"
-                    variant={
-                      date?.getMinutes() === minute ? 'default' : 'ghost'
-                    }
-                    onClick={() => updateTimePart('minute', minute)}
-                  >
-                    {minute.toString().padStart(2, '0')}
-                  </Button>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
+              {/* MINUTES */}
+              <ScrollArea className="w-20">
+                <div
+                  className="flex flex-col p-2 gap-1"
+                  onWheel={(e) => handleWheel(e, 'minute')}
+                >
+                  {minutes.map((minute) => (
+                    <Button
+                      key={minute}
+                      size="icon"
+                      variant={
+                        date?.getMinutes() === minute ? 'default' : 'ghost'
+                      }
+                      onClick={() => updateTimePart('minute', minute)}
+                    >
+                      {minute.toString().padStart(2, '0')}
+                    </Button>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

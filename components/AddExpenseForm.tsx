@@ -210,6 +210,8 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
 
                   <FormControl>
                     <DateTimePicker
+                    disabled={false}
+                    mode="date"
                       value={
                         field.value instanceof Date ? field.value : undefined
                       }
