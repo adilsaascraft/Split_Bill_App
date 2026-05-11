@@ -1,3 +1,5 @@
+// /app/api/expenses/route.ts
+
 import { connectDB } from '@/lib/db'
 import { Expense } from '@/lib/models/Expense'
 import { User } from '@/lib/models/User'
@@ -7,6 +9,7 @@ import jwt from 'jsonwebtoken'
 /* ================= AUTH ================= */
 async function getAuthUser() {
   const cookieStore = await cookies()
+
   const token = cookieStore.get('token')?.value
 
   if (!token) return null
@@ -28,6 +31,7 @@ function calculateBalances(expenses: any[], users: any[]) {
 
   expenses.forEach((e) => {
     const id = e.paidBy._id.toString()
+
     spent[id] += e.amount
   })
 
@@ -47,23 +51,36 @@ function calculateBalances(expenses: any[], users: any[]) {
 /* ================= SETTLEMENT ================= */
 function settleBalances(balances: Record<string, number>) {
   const debtors: any[] = []
+
   const creditors: any[] = []
 
   for (const userId in balances) {
     const amt = balances[userId]
 
-    if (amt < 0) debtors.push({ userId, amount: -amt })
+    if (amt < 0) {
+      debtors.push({
+        userId,
+        amount: -amt,
+      })
+    }
 
-    if (amt > 0) creditors.push({ userId, amount: amt })
+    if (amt > 0) {
+      creditors.push({
+        userId,
+        amount: amt,
+      })
+    }
   }
 
   const transactions: any[] = []
 
   let i = 0
+
   let j = 0
 
   while (i < debtors.length && j < creditors.length) {
     const d = debtors[i]
+
     const c = creditors[j]
 
     const pay = Math.min(d.amount, c.amount)
@@ -75,9 +92,11 @@ function settleBalances(balances: Record<string, number>) {
     })
 
     d.amount -= pay
+
     c.amount -= pay
 
     if (d.amount === 0) i++
+
     if (c.amount === 0) j++
   }
 
@@ -87,6 +106,7 @@ function settleBalances(balances: Record<string, number>) {
 /* =====================================================
    📥 GET
 ===================================================== */
+
 export async function GET(req: Request) {
   try {
     await connectDB()
@@ -95,7 +115,10 @@ export async function GET(req: Request) {
 
     if (!decoded) {
       return Response.json(
-        { success: false, message: 'Unauthorized' },
+        {
+          success: false,
+          message: 'Unauthorized',
+        },
         { status: 401 },
       )
     }
@@ -108,9 +131,12 @@ export async function GET(req: Request) {
 
     const year = Number(searchParams.get('year')) || now.getFullYear()
 
-    const start = new Date(year, month - 1, 1, 0, 0, 0)
+    /* =================================================
+       ✅ FIXED FILTER LOGIC (UTC SAFE)
+    ================================================= */
+const start = new Date(year, month - 1, 1, 0, 0, 0)
 
-    const end = new Date(year, month, 1, 0, 0, 0)
+const end = new Date(year, month, 1, 0, 0, 0)
 
     const expenses = await Expense.find({
       date: {
@@ -120,7 +146,12 @@ export async function GET(req: Request) {
     })
       .populate('paidBy', 'name')
       .populate('createdBy', 'name role')
-      .sort({ date: -1 })
+
+      /* ✅ IMPROVED SORT */
+      .sort({
+        date: -1,
+        createdAt: -1,
+      })
 
     const users = await User.find().select('_id name')
 
@@ -136,11 +167,13 @@ export async function GET(req: Request) {
       return {
         from: {
           id: s.from,
+
           name: fromUser?.name || 'Unknown',
         },
 
         to: {
           id: s.to,
+
           name: toUser?.name || 'Unknown',
         },
 
@@ -150,7 +183,9 @@ export async function GET(req: Request) {
 
     return Response.json({
       success: true,
+
       data: expenses,
+
       summary: {
         total: expenses.reduce((sum, e) => sum + e.amount, 0),
 
@@ -160,6 +195,7 @@ export async function GET(req: Request) {
             : 0,
 
         balances,
+
         settlements,
       },
     })
@@ -179,6 +215,7 @@ export async function GET(req: Request) {
 /* =====================================================
    ➕ CREATE
 ===================================================== */
+
 export async function POST(req: Request) {
   try {
     await connectDB()
@@ -199,7 +236,7 @@ export async function POST(req: Request) {
 
     const { category, title, amount, paidBy, date } = body
 
-    if ( !category || !title || !amount || !paidBy) {
+    if (!category || !title || !amount || !paidBy) {
       return Response.json(
         {
           success: false,
@@ -220,13 +257,30 @@ export async function POST(req: Request) {
       )
     }
 
+    const expenseDate = date ? new Date(date) : new Date()
+
+    if (isNaN(expenseDate.getTime())) {
+      return Response.json(
+        {
+          success: false,
+          message: 'Invalid expense date',
+        },
+        { status: 400 },
+      )
+    }
+
     const expense = await Expense.create({
       category,
+
       title,
+
       amount,
+
       paidBy,
+
       createdBy: decoded.userId,
-      date: date ? new Date(date) : new Date(),
+
+      date: expenseDate,
     })
 
     return Response.json(
@@ -252,6 +306,7 @@ export async function POST(req: Request) {
 /* =====================================================
    ✏️ UPDATE
 ===================================================== */
+
 export async function PUT(req: Request) {
   try {
     await connectDB()
@@ -299,10 +354,28 @@ export async function PUT(req: Request) {
     }
 
     expense.category = category
+
     expense.title = title
+
     expense.amount = amount
+
     expense.paidBy = paidBy
-    expense.date = date ? new Date(date) : expense.date
+
+    if (date) {
+      const updatedDate = new Date(date)
+
+      if (isNaN(updatedDate.getTime())) {
+        return Response.json(
+          {
+            success: false,
+            message: 'Invalid expense date',
+          },
+          { status: 400 },
+        )
+      }
+
+      expense.date = updatedDate
+    }
 
     await expense.save()
 
@@ -326,6 +399,7 @@ export async function PUT(req: Request) {
 /* =====================================================
    ❌ DELETE
 ===================================================== */
+
 export async function DELETE(req: Request) {
   try {
     await connectDB()

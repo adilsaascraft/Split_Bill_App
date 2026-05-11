@@ -108,7 +108,7 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
       form.reset({
         category: 'Groceries',
         title: '',
-        amount: 0,
+        amount: null,
         date: new Date(),
         paidBy: user?.id || '',
       })
@@ -235,8 +235,8 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                   <Select
                     value={field.value || ''}
                     onValueChange={field.onChange}
-                    // 🔐 create mode disabled
-                    disabled={!defaultValues?._id}
+                    // 🔐 create and update mode disabled
+                    disabled
                   >
                     <FormControl>
                       <SelectTrigger className="w-full p-3">
