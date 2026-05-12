@@ -5,6 +5,8 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 
+import { format } from 'date-fns'
+
 import {
   Form,
   FormControl,
@@ -21,12 +23,14 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select'
+
 import { category } from '@/lib/constant/static'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SheetClose } from '@/components/ui/sheet'
 
-import { DateTimePicker } from '@/components/DateTimePicker'
+import { DatePicker } from '@/components/DatePicker'
 
 import { ExpenseSchema, ExpenseInput } from '@/schemas/expense.schema'
 
@@ -35,6 +39,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { toast } from 'sonner'
 
 /* ================= FETCHER ================= */
+
 const fetcher = (url: string) =>
   fetch(url, {
     credentials: 'include',
@@ -59,14 +64,20 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
 
     defaultValues: {
       category: defaultValues?.category || 'Groceries',
+
       title: defaultValues?.title || '',
+
       amount: defaultValues?.amount || 0,
-      date: defaultValues?.date ? new Date(defaultValues.date) : new Date(),
+
+      // ✅ PURE DATE STRING
+      date: defaultValues?.date || format(new Date(), 'yyyy-MM-dd'),
+
       paidBy: defaultValues?.paidBy || user?.id || '',
     },
   })
 
   /* ================= SUBMIT ================= */
+
   const onSubmit = async (data: ExpenseInput) => {
     try {
       setLoading(true)
@@ -94,7 +105,9 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
 
       const result = await res.json()
 
-      if (!res.ok) throw new Error(result.message)
+      if (!res.ok) {
+        throw new Error(result.message)
+      }
 
       toast.success(
         defaultValues?._id
@@ -103,13 +116,17 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
       )
 
       onSave?.(result.data)
-      console.log(data)
 
       form.reset({
         category: 'Groceries',
+
         title: '',
+
         amount: null,
-        date: new Date(),
+
+        // ✅ RESET PURE DATE STRING
+        date: format(new Date(), 'yyyy-MM-dd'),
+
         paidBy: user?.id || '',
       })
     } catch (err: any) {
@@ -120,9 +137,10 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
   }
 
   /* ================= UI ================= */
+
   return (
     <div className="flex flex-col h-screen justify-between mb-24">
-      <div className="flex-1 overflow-y-auto pr-3 pl-3 ">
+      <div className="flex-1 overflow-y-auto pr-3 pl-3">
         <Form {...form}>
           <form
             id="expense-form"
@@ -136,10 +154,12 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category *</FormLabel>
+
                   <Select onValueChange={field.onChange} value={field.value}>
                     <SelectTrigger className="w-full p-3">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
+
                     <SelectContent>
                       {category.map((c) => (
                         <SelectItem key={c.value} value={c.value}>
@@ -148,6 +168,7 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                       ))}
                     </SelectContent>
                   </Select>
+
                   <FormMessage />
                 </FormItem>
               )}
@@ -209,13 +230,13 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                   <FormLabel>Date</FormLabel>
 
                   <FormControl>
-                    <DateTimePicker
-                    disabled={false}
-                    mode="date"
-                      value={
-                        field.value instanceof Date ? field.value : undefined
-                      }
-                      onChange={field.onChange}
+                    <DatePicker
+                      disabled={false}
+                      disableFuture={true}
+                      value={field.value ? new Date(field.value) : undefined}
+                      onChange={(date) => {
+                        field.onChange(date ? format(date, 'yyyy-MM-dd') : '')
+                      }}
                     />
                   </FormControl>
 
@@ -235,7 +256,6 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                   <Select
                     value={field.value || ''}
                     onValueChange={field.onChange}
-                    // 🔐 create and update mode disabled
                     disabled
                   >
                     <FormControl>
@@ -273,8 +293,7 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
           type="submit"
           form="expense-form"
           disabled={loading}
-          className="bg-sky-800
-                hover:bg-sky-900"
+          className="bg-sky-800 hover:bg-sky-900"
         >
           {loading
             ? defaultValues?._id

@@ -31,10 +31,11 @@ const ExpenseSchema = new Schema(
       max: 100000,
     },
 
+    // ✅ PURE CALENDAR DATE
+    // Format: yyyy-MM-dd
     date: {
-      type: Date,
+      type: String,
       required: true,
-      default: Date.now,
     },
 
     paidBy: {

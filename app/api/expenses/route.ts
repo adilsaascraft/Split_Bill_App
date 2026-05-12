@@ -132,22 +132,23 @@ export async function GET(req: Request) {
     const year = Number(searchParams.get('year')) || now.getFullYear()
 
     /* =================================================
-       ✅ FIXED FILTER LOGIC (UTC SAFE)
+       ✅ PURE CALENDAR DATE FILTER
+       Format: yyyy-MM-dd
     ================================================= */
-const start = new Date(year, month - 1, 1, 0, 0, 0)
 
-const end = new Date(year, month, 1, 0, 0, 0)
+    const formattedMonth = month.toString().padStart(2, '0')
+
+    const monthPrefix = `${year}-${formattedMonth}`
 
     const expenses = await Expense.find({
       date: {
-        $gte: start,
-        $lt: end,
+        $regex: `^${monthPrefix}`,
       },
     })
       .populate('paidBy', 'name')
       .populate('createdBy', 'name role')
 
-      /* ✅ IMPROVED SORT */
+      /* ✅ SORT BY DATE DESC */
       .sort({
         date: -1,
         createdAt: -1,
@@ -167,13 +168,11 @@ const end = new Date(year, month, 1, 0, 0, 0)
       return {
         from: {
           id: s.from,
-
           name: fromUser?.name || 'Unknown',
         },
 
         to: {
           id: s.to,
-
           name: toUser?.name || 'Unknown',
         },
 
@@ -236,7 +235,7 @@ export async function POST(req: Request) {
 
     const { category, title, amount, paidBy, date } = body
 
-    if (!category || !title || !amount || !paidBy) {
+    if (!category || !title || !amount || !paidBy || !date) {
       return Response.json(
         {
           success: false,
@@ -257,13 +256,17 @@ export async function POST(req: Request) {
       )
     }
 
-    const expenseDate = date ? new Date(date) : new Date()
+    /* ==========================================
+       ✅ VALIDATE yyyy-MM-dd FORMAT
+    ========================================== */
 
-    if (isNaN(expenseDate.getTime())) {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+
+    if (!dateRegex.test(date)) {
       return Response.json(
         {
           success: false,
-          message: 'Invalid expense date',
+          message: 'Invalid date format. Use yyyy-MM-dd',
         },
         { status: 400 },
       )
@@ -280,7 +283,8 @@ export async function POST(req: Request) {
 
       createdBy: decoded.userId,
 
-      date: expenseDate,
+      // ✅ STORE PURE DATE STRING
+      date,
     })
 
     return Response.json(
@@ -362,19 +366,20 @@ export async function PUT(req: Request) {
     expense.paidBy = paidBy
 
     if (date) {
-      const updatedDate = new Date(date)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/
 
-      if (isNaN(updatedDate.getTime())) {
+      if (!dateRegex.test(date)) {
         return Response.json(
           {
             success: false,
-            message: 'Invalid expense date',
+            message: 'Invalid date format. Use yyyy-MM-dd',
           },
           { status: 400 },
         )
       }
 
-      expense.date = updatedDate
+      // ✅ PURE DATE STRING
+      expense.date = date
     }
 
     await expense.save()

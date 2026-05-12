@@ -29,9 +29,11 @@ export const ExpenseSchema = z.object({
     .min(1, 'Amount must be greater than 0')
     .max(100000, 'Amount cannot exceed 1 lakh'),
 
-  date: z.coerce.date({
-    message: 'date time is required',
-  }),
+  // ✅ PURE CALENDAR DATE
+  // Format: yyyy-MM-dd
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in yyyy-MM-dd format'),
 
   paidBy: z.string().min(1, 'Select payer'),
 })
@@ -42,4 +44,5 @@ export const ExpenseSchema = z.object({
 */
 
 export type ExpenseInput = z.input<typeof ExpenseSchema>
+
 export type ExpenseValues = z.output<typeof ExpenseSchema>
