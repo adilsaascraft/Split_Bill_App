@@ -1,10 +1,34 @@
+import dns from 'node:dns'
 import mongoose from 'mongoose'
 
-const MONGODB_URI = process.env.MONGODB_URI!
+dns.setServers(['8.8.8.8', '1.1.1.1'])
 
-if (!MONGODB_URI) {
-  throw new Error('Please define MONGODB_URI')
+console.log('🌐 Node DNS servers:', dns.getServers())
+
+dns.promises
+  .resolveSrv('_mongodb._tcp.cluster0.g29gkhy.mongodb.net')
+  .then((records) => {
+    console.log('✅ SRV DNS resolution works:', records)
+  })
+  .catch((error) => {
+    console.error('❌ SRV DNS resolution failed:', error)
+  })
+
+// Fix Node.js SRV DNS resolution on networks where the default DNS
+// resolver refuses MongoDB Atlas SRV queries.
+dns.setServers(['8.8.8.8', '1.1.1.1'])
+
+function getMongoUri(): string {
+  const uri = process.env.MONGO_URI
+
+  if (!uri) {
+    throw new Error('❌ MONGO_URI is not defined')
+  }
+
+  return uri
 }
+
+const MONGO_URI = getMongoUri()
 
 type MongooseCache = {
   conn: typeof mongoose | null
@@ -12,28 +36,48 @@ type MongooseCache = {
 }
 
 declare global {
-  var mongoose: MongooseCache
+  // eslint-disable-next-line no-var
+  var mongooseCache: MongooseCache | undefined
 }
 
-let cached = global.mongoose
-
-if (!cached) {
-  cached = global.mongoose = { conn: null, promise: null }
+const cached: MongooseCache = global.mongooseCache ?? {
+  conn: null,
+  promise: null,
 }
 
-export async function connectDB() {
-  if (cached.conn) return cached.conn
+global.mongooseCache = cached
+
+export async function connectDB(): Promise<typeof mongoose> {
+  console.log('➡️ connectDB() called')
+
+  if (cached.conn) {
+    console.log('✅ Using existing MongoDB connection')
+    return cached.conn
+  }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI, {
-      dbName: 'Room_Expenses', // 🔥 force correct DB
-      bufferCommands: false,
-    })
+    console.log('🔄 Connecting to MongoDB...')
+
+    cached.promise = mongoose
+      .connect(MONGO_URI, {
+        serverSelectionTimeoutMS: 10000,
+      })
+      .then((connection) => {
+        console.log('✅ MongoDB Connected')
+        return connection
+      })
+      .catch((error) => {
+        cached.promise = null
+
+        console.error('❌ MongoDB Connection Error:', error)
+
+        throw error
+      })
   }
 
   cached.conn = await cached.promise
 
-  console.log('Connected DB:', mongoose.connection.name)
+  console.log('✅ connectDB() finished')
 
   return cached.conn
 }

@@ -1,255 +1,116 @@
 // /app/api/users/route.ts
-
 import { connectDB } from '@/lib/db'
 import { User } from '@/lib/models/User'
-import bcrypt from 'bcryptjs'
-
-import { cookies } from 'next/headers'
-import jwt from 'jsonwebtoken'
-
-/* =====================================================
-   🧠 Helper: Get Auth User
-===================================================== */
-async function getAuthUser() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('token')?.value
-
-  if (!token) return null
-
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET!)
-  } catch {
-    return null
-  }
-}
+import { Expense } from '@/lib/models/Expense'
+import { getAuthUser, requireAdmin, apiSuccess, apiError, ApiError } from '@/lib/auth/session'
+import { createUser, updateUser } from '@/lib/services/userService'
+import { UserSchema } from '@/schemas/user.schema'
 
 /* =====================================================
-   📥 GET USERS
+   GET /api/users — any authenticated user can list users
+   (needed for the "paid by" picker), passwords never selected.
 ===================================================== */
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await connectDB()
-
-    const decoded: any = await getAuthUser()
-
-    if (!decoded) {
-      return Response.json(
-        { success: false, message: 'Only logged-in users can view users' },
-        { status: 401 },
-      )
+    const auth = await getAuthUser()
+    if (!auth) {
+      throw new ApiError(401, 'Only logged-in users can view users', 'UNAUTHENTICATED')
     }
 
-    const users = await User.find().select('-pin').sort({ createdAt: -1 })
+    const { searchParams } = new URL(req.url)
+    const status = searchParams.get('status') // active | inactive | suspended
 
-    return Response.json({
-      success: true,
-      data: users,
-    })
-  } catch (error) {
-    return Response.json(
-      { success: false, message: 'Failed to fetch users' },
-      { status: 500 },
-    )
+    const filter: Record<string, unknown> = {}
+    if (status) filter.status = status
+
+    const users = await User.find(filter).select('-pin').sort({ createdAt: -1 })
+    return apiSuccess(users)
+  } catch (err) {
+    return apiError(err)
   }
 }
 
 /* =====================================================
-   👤 CREATE USER
+   POST /api/users — bootstrap creates the first admin; every
+   subsequent call requires an authenticated admin (see userService
+   for why `role` from the body is never trusted).
 ===================================================== */
 export async function POST(req: Request) {
   try {
     await connectDB()
-
-    const adminExists = await User.findOne({ role: 'admin' })
-
-    let decoded: any = null
-
-    if (adminExists) {
-      decoded = await getAuthUser()
-
-      if (!decoded) {
-        return Response.json(
-          { success: false, message: 'Only admin can delete users' },
-          { status: 401 },
-        )
-      }
-
-      if (decoded.role !== 'admin') {
-        return Response.json(
-          { success: false, message: 'Only admin can update users' },
-          { status: 403 },
-        )
-      }
-    }
+    const auth = await getAuthUser()
 
     const body = await req.json()
-    const { username, email, mobile, name, pin, role } = body
-
-    if (!username || !email || !mobile || !name || !pin) {
-      return Response.json(
-        { success: false, message: 'All fields are required' },
-        { status: 400 },
-      )
+    const parsed = UserSchema.safeParse(body)
+    if (!parsed.success) {
+      throw new ApiError(400, 'Invalid user data', 'VALIDATION_ERROR', { issues: parsed.error.issues })
     }
 
-    if (pin.length !== 6) {
-      return Response.json(
-        { success: false, message: 'PIN must be 6 digits' },
-        { status: 400 },
-      )
+    const user = await createUser(auth, parsed.data)
+    const { pin, ...safeUser } = user.toObject()
+    return apiSuccess(safeUser, 'User created successfully')
+  } catch (err: any) {
+    if (err?.code === 11000) {
+      return apiError(new ApiError(409, 'A second admin cannot be created', 'SINGLE_ADMIN_VIOLATION'))
     }
-
-    const existingUser = await User.findOne({
-      $or: [{ email }, { mobile }, { username }],
-    })
-
-    if (existingUser) {
-      return Response.json(
-        { success: false, message: 'User already exists' },
-        { status: 400 },
-      )
-    }
-
-    const hashedPin = await bcrypt.hash(pin, 10)
-
-    const finalRole = adminExists ? role || 'user' : 'admin'
-
-    const user = await User.create({
-      username,
-      email,
-      mobile,
-      name,
-      pin: hashedPin,
-      role: finalRole,
-    })
-
-    return Response.json({
-      success: true,
-      data: user,
-    })
-  } catch {
-    return Response.json(
-      { success: false, message: 'Something went wrong' },
-      { status: 500 },
-    )
+    return apiError(err)
   }
 }
 
 /* =====================================================
-   ✏️ UPDATE USER (Admin + User allowed)
+   PATCH /api/users — self or admin can update profile fields.
+   Role is never accepted here at all.
 ===================================================== */
-export async function PUT(req: Request) {
+export async function PATCH(req: Request) {
   try {
     await connectDB()
-
-    const decoded: any = await getAuthUser()
-
-    // 🔐 Must be logged in
-    if (!decoded) {
-      return Response.json(
-        { success: false, message: 'Unauthorized' },
-        { status: 401 },
-      )
-    }
-
-    // 🔥 NEW: Only admin allowed
-    if (decoded.role !== 'admin') {
-      return Response.json(
-        { success: false, message: 'Only admin can update users' },
-        { status: 403 },
-      )
-    }
+    const auth = await getAuthUser()
+    if (!auth) throw new ApiError(401, 'Unauthorized', 'UNAUTHENTICATED')
 
     const body = await req.json()
-    const { id, username, email, mobile, name, pin, role } = body
+    const { id, ...rest } = body
+    if (!id) throw new ApiError(400, 'User id is required', 'VALIDATION_ERROR')
 
-    const user = await User.findById(id)
-
-    if (!user) {
-      return Response.json(
-        { success: false, message: 'User not found' },
-        { status: 404 },
-      )
-    }
-
-    // ✏️ Update fields
-    if (username) user.username = username
-    if (email) user.email = email
-    if (mobile) user.mobile = mobile
-    if (name) user.name = name
-    if (role) user.role = role
-
-    // 🔐 Handle PIN
-    if (pin) {
-      if (pin.length !== 6) {
-        return Response.json(
-          { success: false, message: 'PIN must be 6 digits' },
-          { status: 400 },
-        )
-      }
-      user.pin = await bcrypt.hash(pin, 10)
-    }
-
-    await user.save()
-
-    return Response.json({
-      success: true,
-      message: 'User updated successfully',
-    })
-  } catch {
-    return Response.json(
-      { success: false, message: 'Update failed' },
-      { status: 500 },
-    )
+    const user = await updateUser(auth, id, rest)
+    const { pin, ...safeUser } = user.toObject()
+    return apiSuccess(safeUser, 'User updated successfully')
+  } catch (err) {
+    return apiError(err)
   }
 }
 
 /* =====================================================
-   ❌ DELETE USER (Only user, NOT admin)
+   DELETE /api/users?id= — admin only. Prefer this to be used
+   rarely; deactivate is the normal lifecycle path (spec section 50).
+   Refuses to hard-delete a user who has any expenses on record —
+   soft deactivation must be used instead to preserve history.
 ===================================================== */
 export async function DELETE(req: Request) {
   try {
     await connectDB()
-
-    const decoded: any = await getAuthUser()
-
-    if (!decoded || decoded.role !== 'admin') {
-      return Response.json(
-        { success: false, message: 'Only admin can delete users' },
-        { status: 403 },
-      )
-    }
+    const auth = await requireAdmin()
 
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
+    if (!id) throw new ApiError(400, 'User id is required', 'VALIDATION_ERROR')
 
     const user = await User.findById(id)
+    if (!user) throw new ApiError(404, 'User not found', 'USER_NOT_FOUND')
+    if (user.role === 'admin') throw new ApiError(403, 'Admin cannot be deleted', 'FORBIDDEN_ADMIN_PROTECTED')
 
-    if (!user) {
-      return Response.json(
-        { success: false, message: 'User not found' },
-        { status: 404 },
-      )
-    }
-
-    // 🚫 Prevent admin deletion
-    if (user.role === 'admin') {
-      return Response.json(
-        { success: false, message: 'Admin cannot be deleted' },
-        { status: 403 },
+    const hasExpenses = await Expense.exists({ $or: [{ paidBy: id }, { createdBy: id }] })
+    if (hasExpenses) {
+      throw new ApiError(
+        409,
+        'This user has expense history and cannot be permanently deleted — deactivate them instead',
+        'USER_HAS_HISTORY',
       )
     }
 
     await User.findByIdAndDelete(id)
-
-    return Response.json({
-      success: true,
-      message: 'User deleted successfully',
-    })
-  } catch {
-    return Response.json(
-      { success: false, message: 'Delete failed' },
-      { status: 500 },
-    )
+    return apiSuccess(null, 'User deleted successfully')
+  } catch (err) {
+    return apiError(err)
   }
 }
