@@ -5,8 +5,6 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 
-import { format } from 'date-fns'
-
 import {
   Form,
   FormControl,
@@ -24,68 +22,113 @@ import {
   SelectItem,
 } from '@/components/ui/select'
 
-import { category } from '@/lib/constant/static'
-
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SheetClose } from '@/components/ui/sheet'
 
 import { DatePicker } from '@/components/DatePicker'
 
-import { ExpenseSchema, ExpenseInput } from '@/schemas/expense.schema'
+import {
+  CreateExpenseSchema,
+  type CreateExpenseValues,
+} from '@/schemas/expense.schema'
 
 import { useAuthStore } from '@/store/useAuthStore'
 
 import { toast } from 'sonner'
 
-/* ================= FETCHER ================= */
+/* ================= TYPES ================= */
 
-const fetcher = (url: string) =>
-  fetch(url, {
-    credentials: 'include',
-  }).then((r) => r.json())
+type ExpenseUser = {
+  _id: string
+  name?: string
+  fullName?: string
+  username?: string
+}
+
+type ExpenseDefaultValues = Partial<CreateExpenseValues> & {
+  _id?: string
+}
 
 type Props = {
-  defaultValues?: any
-  onSave: (entry: any) => void
+  defaultValues?: ExpenseDefaultValues
+  onSave: (entry: unknown) => void
 }
+
+/* ================= FETCHER ================= */
+
+const fetcher = async (url: string) => {
+  const response = await fetch(url, {
+    credentials: 'include',
+  })
+
+  const result = await response.json()
+
+  if (!response.ok) {
+    throw new Error(result.message || 'Failed to fetch users')
+  }
+
+  return result
+}
+
+/* ================= COMPONENT ================= */
 
 export default function AddExpenseForm({ defaultValues, onSave }: Props) {
   const { user } = useAuthStore()
 
   const { data: userRes } = useSWR('/api/users', fetcher)
 
-  const users = userRes?.data || []
+  const users: ExpenseUser[] = userRes?.data ?? []
 
   const [loading, setLoading] = useState(false)
 
-  const form = useForm<ExpenseInput>({
-    resolver: zodResolver(ExpenseSchema),
+  /* ================= FORM ================= */
+
+  const form = useForm<CreateExpenseValues>({
+    resolver: zodResolver(CreateExpenseSchema),
 
     defaultValues: {
-      category: defaultValues?.category || 'Groceries',
+      title: defaultValues?.title ?? '',
 
-      title: defaultValues?.title || '',
+      description: defaultValues?.description ?? null,
 
-      amount: defaultValues?.amount || 0,
+      categoryId: defaultValues?.categoryId ?? '',
 
-      // ✅ PURE DATE STRING
-      date: defaultValues?.date || format(new Date(), 'yyyy-MM-dd'),
+      amount: defaultValues?.amount ?? 0,
 
-      paidBy: defaultValues?.paidBy || user?.id || '',
+      expenseDate: defaultValues?.expenseDate
+        ? new Date(defaultValues.expenseDate)
+        : new Date(),
+
+      paidBy: defaultValues?.paidBy ?? user?.id ?? '',
+
+      paymentMethod: defaultValues?.paymentMethod ?? null,
+
+      merchant: defaultValues?.merchant ?? null,
+
+      notes: defaultValues?.notes ?? null,
+
+      tags: defaultValues?.tags ?? [],
     },
   })
 
   /* ================= SUBMIT ================= */
 
-  const onSubmit = async (data: ExpenseInput) => {
+  const onSubmit = async (data: CreateExpenseValues) => {
     try {
       setLoading(true)
 
-      const method = defaultValues?._id ? 'PUT' : 'POST'
+      const isEditing = Boolean(defaultValues?._id)
 
-      const res = await fetch('/api/expenses', {
-        method,
+      const payload = isEditing
+        ? {
+            id: defaultValues?._id,
+            ...data,
+          }
+        : data
+
+      const response = await fetch('/api/expenses', {
+        method: isEditing ? 'PUT' : 'POST',
 
         credentials: 'include',
 
@@ -93,44 +136,51 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
           'Content-Type': 'application/json',
         },
 
-        body: JSON.stringify(
-          defaultValues?._id
-            ? {
-                id: defaultValues._id,
-                ...data,
-              }
-            : data,
-        ),
+        body: JSON.stringify(payload),
       })
 
-      const result = await res.json()
+      const result = await response.json()
 
-      if (!res.ok) {
-        throw new Error(result.message)
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to save expense')
       }
 
       toast.success(
-        defaultValues?._id
+        isEditing
           ? 'Expense updated successfully'
           : 'Expense created successfully',
       )
 
-      onSave?.(result.data)
+      onSave(result.data)
+
+      /* ================= RESET ================= */
 
       form.reset({
-        category: 'Groceries',
-
         title: '',
 
-        amount: null,
+        description: null,
 
-        // ✅ RESET PURE DATE STRING
-        date: format(new Date(), 'yyyy-MM-dd'),
+        categoryId: '',
 
-        paidBy: user?.id || '',
+        amount: 0,
+
+        expenseDate: new Date(),
+
+        paidBy: user?.id ?? '',
+
+        paymentMethod: null,
+
+        merchant: null,
+
+        notes: null,
+
+        tags: [],
       })
-    } catch (err: any) {
-      toast.error(err.message || 'Something went wrong')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Something went wrong'
+
+      toast.error(message)
     } finally {
       setLoading(false)
     }
@@ -139,52 +189,26 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
   /* ================= UI ================= */
 
   return (
-    <div className="flex flex-col h-screen justify-between mb-24">
-      <div className="flex-1 overflow-y-auto pr-3 pl-3">
+    <div className="flex h-screen flex-col justify-between mb-24">
+      <div className="flex-1 overflow-y-auto px-3 pr-3">
         <Form {...form}>
           <form
             id="expense-form"
             onSubmit={form.handleSubmit(onSubmit)}
             className="space-y-4"
           >
-            {/* CATEGORY */}
-            <FormField
-              control={form.control}
-              name="category"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Category *</FormLabel>
+            {/* ================= TITLE ================= */}
 
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <SelectTrigger className="w-full p-3">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-
-                    <SelectContent>
-                      {category.map((c) => (
-                        <SelectItem key={c.value} value={c.value}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* TITLE */}
             <FormField
               control={form.control}
               name="title"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Title</FormLabel>
+                  <FormLabel>Title *</FormLabel>
 
                   <FormControl>
                     <Input
-                      placeholder="Enter title"
+                      placeholder="Enter expense title"
                       {...field}
                       value={field.value ?? ''}
                     />
@@ -195,47 +219,26 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
               )}
             />
 
-            {/* AMOUNT */}
+            {/* ================= AMOUNT ================= */}
+
             <FormField
               control={form.control}
               name="amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Amount</FormLabel>
+                  <FormLabel>Amount *</FormLabel>
 
                   <FormControl>
                     <Input
                       type="number"
+                      min="1"
+                      step="0.01"
                       placeholder="Enter amount"
                       value={typeof field.value === 'number' ? field.value : ''}
-                      onChange={(e) =>
-                        field.onChange(
-                          e.target.value === '' ? '' : Number(e.target.value),
-                        )
-                      }
-                    />
-                  </FormControl>
+                      onChange={(event) => {
+                        const value = event.target.value
 
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* DATE */}
-            <FormField
-              control={form.control}
-              name="date"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Date</FormLabel>
-
-                  <FormControl>
-                    <DatePicker
-                      disabled={false}
-                      disableFuture={true}
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(date) => {
-                        field.onChange(date ? format(date, 'yyyy-MM-dd') : '')
+                        field.onChange(value === '' ? '' : Number(value))
                       }}
                     />
                   </FormControl>
@@ -245,7 +248,66 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
               )}
             />
 
-            {/* PAID BY */}
+            {/* ================= CATEGORY ================= */}
+
+            <FormField
+              control={form.control}
+              name="categoryId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Category *</FormLabel>
+
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger className="w-full p-3">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                    </FormControl>
+
+                    <SelectContent>
+                      {/*
+                        IMPORTANT:
+                        `value` must be a MongoDB ObjectId because
+                        CreateExpenseSchema expects categoryId to be
+                        a 24-character ObjectId.
+
+                        Replace these with your actual category records.
+                      */}
+                    </SelectContent>
+                  </Select>
+
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* ================= EXPENSE DATE ================= */}
+
+            <FormField
+              control={form.control}
+              name="expenseDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Expense Date *</FormLabel>
+
+                  <FormControl>
+                    <DatePicker
+                      disabled={false}
+                      disableFuture
+                      value={field.value}
+                      onChange={(date) => {
+                        field.onChange(date ?? undefined)
+                      }}
+                    />
+                  </FormControl>
+
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* ================= PAID BY ================= */}
+
             <FormField
               control={form.control}
               name="paidBy"
@@ -254,7 +316,7 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                   <FormLabel>Paid By</FormLabel>
 
                   <Select
-                    value={field.value || ''}
+                    value={field.value}
                     onValueChange={field.onChange}
                     disabled
                   >
@@ -265,9 +327,15 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                     </FormControl>
 
                     <SelectContent>
-                      {users.map((u: any) => (
-                        <SelectItem key={u._id} value={u._id}>
-                          {u.name}
+                      {users.map((expenseUser) => (
+                        <SelectItem
+                          key={expenseUser._id}
+                          value={expenseUser._id}
+                        >
+                          {expenseUser.fullName ??
+                            expenseUser.name ??
+                            expenseUser.username ??
+                            expenseUser._id}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -277,14 +345,103 @@ export default function AddExpenseForm({ defaultValues, onSave }: Props) {
                 </FormItem>
               )}
             />
+
+            {/* ================= DESCRIPTION ================= */}
+
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description</FormLabel>
+
+                  <FormControl>
+                    <Input
+                      placeholder="Optional description"
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* ================= MERCHANT ================= */}
+
+            <FormField
+              control={form.control}
+              name="merchant"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Merchant</FormLabel>
+
+                  <FormControl>
+                    <Input
+                      placeholder="Optional merchant"
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* ================= PAYMENT METHOD ================= */}
+
+            <FormField
+              control={form.control}
+              name="paymentMethod"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Payment Method</FormLabel>
+
+                  <FormControl>
+                    <Input
+                      placeholder="e.g. Cash, UPI, Card"
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* ================= NOTES ================= */}
+
+            <FormField
+              control={form.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notes</FormLabel>
+
+                  <FormControl>
+                    <Input
+                      placeholder="Optional notes"
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </form>
         </Form>
       </div>
 
-      {/* FOOTER */}
-      <div className="sticky bottom-0 border-t px-4 py-3 flex justify-between bg-white">
+      {/* ================= FOOTER ================= */}
+
+      <div className="sticky bottom-0 flex justify-between border-t bg-white px-4 py-3">
         <SheetClose asChild>
-          <Button variant="outline" disabled={loading}>
+          <Button type="button" variant="outline" disabled={loading}>
             Close
           </Button>
         </SheetClose>
